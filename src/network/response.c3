@@ -6,5 +6,7 @@ struct HttpResponse {
     String body;
     String final_url;
     bool ok;
+    String error_kind;
     String error_message;
+    usz bytes_downloaded;
 }

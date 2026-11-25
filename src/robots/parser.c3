@@ -1,99 +1,120 @@
 module cebula::robots::parser;
 
-import std::io;
-import std::core::string;
+import std::collections::list;
+import cebula::crawler::url_utils;
+
+const usz NOT_FOUND = usz::max;
 
 struct Rule {
-    bool is_allow; // true=Allow, false=Disallow
+    bool is_allow;
     String path;
 }
 
 struct RobotsRules {
     Rule[] rules;
     String[] sitemaps;
-    int crawl_delay_ms; // -1 if not set
+    int crawl_delay_ms; // -1 when not set
 }
 
-fn RobotsRules parse_robots(String content, String ua_name) {
+fn RobotsRules parse_robots(String content, String ua_name)
+{
     RobotsRules rr;
-    rr.rules = {};
-    rr.sitemaps = {};
+    List{String} sitemaps;
+    sitemaps.init(tmem);
+    List{Rule} rules;
+    rules.init(tmem);
     rr.crawl_delay_ms = -1;
 
-    // Very simplified: collect rules from sections matching * or ua_name
-    // For brevity, just parse all Disallow/Allow lines globally if no sections? Or do basic section handling.
-    // This is a simplification.
+    bool group_matches = false;
+    bool group_has_agent = false;
+    bool group_has_rule = false;
     usz i = 0;
-    bool in_relevant = true; // simplify: apply all rules
-    while (i < content.len) {
-        // read line
-        usz line_start = i;
-        while (i < content.len && content[i] != '\n' && content[i] != '\r') i++;
-        String line = content[line_start..i-1];
-        // skip \r\n
-        if (i < content.len && content[i] == '\r') i++;
-        if (i < content.len && content[i] == '\n') i++;
 
-        // trim leading spaces
-        usz ls = 0;
-        while (ls < line.len && (line[ls] == ' ' || line[ls] == '\t')) ls++;
-        String trimmed = line[ls..];
-        if (trimmed.len == 0) continue;
-        // comment
-        if (trimmed[0] == '#') continue;
+    while (i < content.len)
+    {
+        usz line_end = i;
+        while (line_end < content.len && content[line_end] != '\n' && content[line_end] != '\r') line_end++;
+        String line = url_utils::trim(url_utils::sub(content, i, line_end));
+        i = line_end;
+        while (i < content.len && (content[i] == '\n' || content[i] == '\r')) i++;
 
-        // find colon
-        usz colon = 0;
-        while (colon < trimmed.len && trimmed[colon] != ':') colon++;
-        if (colon >= trimmed.len) continue;
-        String key = trimmed[0..colon-1];
-        String val = trimmed[colon+1..];
-        // trim val
-        usz vs = 0;
-        while (vs < val.len && (val[vs] == ' ' || val[vs] == '\t')) vs++;
-        val = val[vs..];
+        if (line.len == 0 || line[0] == '#') continue;
+        usz colon = url_utils::find_char(line, ':', 0);
+        if (colon == NOT_FOUND) continue;
+        String key = url_utils::lower_copy(url_utils::trim(url_utils::sub(line, 0, colon)));
+        String value = url_utils::trim(url_utils::sub(line, colon + 1, line.len));
 
-        // lowercase key compare (naive)
-        if (eq_ignore_case(key, "user-agent")) {
-            // simplified: if contains ua_name or is *, set relevant
-            if (contains_ignore_case(val, ua_name) || val == "*") {
-                in_relevant = true;
-            } else {
-                in_relevant = false;
+        if (key == "user-agent")
+        {
+            if (!group_has_agent || group_has_rule)
+            {
+                group_matches = value == "*" || (ua_name.len > 0 && url_utils::contains_ignore_case(value, ua_name));
+                group_has_agent = true;
+                group_has_rule = false;
             }
-        } else if (in_relevant && eq_ignore_case(key, "disallow")) {
-            // add rule
-        } else if (in_relevant && eq_ignore_case(key, "allow")) {
-            // add rule
-        } else if (eq_ignore_case(key, "sitemap")) {
-            // record sitemap
+            else
+            {
+                if (value == "*" || (ua_name.len > 0 && url_utils::contains_ignore_case(value, ua_name))) group_matches = true;
+            }
+            continue;
+        }
+
+        if (key == "sitemap")
+        {
+            if (value.len > 0) sitemaps.push(value);
+            continue;
+        }
+
+        if (!group_matches || value.len == 0) continue;
+        group_has_rule = true;
+
+        if (key == "disallow" || key == "allow")
+        {
+            if (value == "*" && key == "allow")
+            {
+                Rule rule = { .is_allow = true, .path = "/" };
+                rules.push(rule);
+                continue;
+            }
+            Rule rule;
+            rule.is_allow = key == "allow";
+            rule.path = value;
+            rules.push(rule);
+        }
+        else if (key == "crawl-delay")
+        {
+            int delay = 0;
+            usz digits = 0;
+            for (usz j = 0; j < value.len; j++)
+            {
+                if (value[j] < '0' || value[j] > '9') break;
+                delay = delay * 10 + (int)(value[j] - '0');
+                digits++;
+            }
+            if (digits > 0) rr.crawl_delay_ms = delay * 1000;
         }
     }
+
+    rr.rules = rules.array_view();
+    rr.sitemaps = sitemaps.array_view();
     return rr;
 }
 
-fn bool eq_ignore_case(String a, String b) {
-    if (a.len != b.len) return false;
-    for (usz i = 0; i < a.len; i++) {
-        char ca = a[i]; char cb = b[i];
-        if (ca >= 'A' && ca <= 'Z') ca = (char)(ca + 32);
-        if (cb >= 'A' && cb <= 'Z') cb = (char)(cb + 32);
-        if (ca != cb) return false;
-    }
-    return true;
-}
-
-fn bool contains_ignore_case(String haystack, String needle) {
-    if (needle.len > haystack.len) return false;
-    for (usz i = 0; i + needle.len <= haystack.len; i++) {
-        bool match = true;
-        for (usz j = 0; j < needle.len; j++) {
-            char ca = haystack[i+j]; char cb = needle[j];
-            if (ca >= 'A' && ca <= 'Z') ca = (char)(ca + 32);
-            if (cb >= 'A' && cb <= 'Z') cb = (char)(cb + 32);
-            if (ca != cb) { match = false; break; }
+fn bool is_allowed(RobotsRules* rules, String path)
+{
+    int best_length = -1;
+    bool best_allow = true;
+    for (usz i = 0; i < rules.rules.len; i++)
+    {
+        String prefix = rules.rules[i].path;
+        if (prefix.len == 0) continue;
+        if (prefix.len > path.len) continue;
+        if (!url_utils::eq_ignore_case(url_utils::sub(path, 0, prefix.len), prefix)) continue;
+        if ((int)prefix.len > best_length || ((int)prefix.len == best_length && rules.rules[i].is_allow))
+        {
+            best_length = (int)prefix.len;
+            best_allow = rules.rules[i].is_allow;
         }
-        if (match) return true;
     }
-    return false;
+    return best_allow;
 }

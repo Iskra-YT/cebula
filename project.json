@@ -10,6 +10,9 @@
   "sources": [
     "src/**"
   ],
+  "test-sources": [
+    "test/**"
+  ],
   "targets": {
     "cebula": {
       "type": "executable"
