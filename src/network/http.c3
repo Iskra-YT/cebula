@@ -5,7 +5,7 @@ import std::core::string;
 import std::io::file;
 import cebula::network::response;
 
-extern fn int system(char* command) @extern("system");
+extern fn int system(char* command);
 
 fn response::HttpResponse fetch_url(String url, int timeout_sec) {
     response::HttpResponse res;
@@ -16,13 +16,9 @@ fn response::HttpResponse fetch_url(String url, int timeout_sec) {
     res.ok = false;
     res.error_message = "";
 
-    // Use curl to fetch; write body to temp file and headers to another
-    // This is a pragmatic workaround
     String tmpbody = "/tmp/cebula_body_tmp.txt";
     String tmpheaders = "/tmp/cebula_headers_tmp.txt";
 
-    // Build command (very simplified; escaping is weak but OK for basic URLs)
-    // Note: in production need proper escaping
     DString cmd;
     cmd.init(mem);
     defer cmd.free();
@@ -34,11 +30,9 @@ fn response::HttpResponse fetch_url(String url, int timeout_sec) {
         return res;
     }
 
-    // read body
     if (file::exists(tmpbody)) {
-        String? bodystr = (String)file::load_new(mem, tmpbody);
-        if (try b = bodystr) {
-            res.body = b;
+        if (try data = file::load(mem, tmpbody)) {
+            res.body = (String)data;
         } else {
             res.body = "";
         }
@@ -46,17 +40,13 @@ fn response::HttpResponse fetch_url(String url, int timeout_sec) {
         res.body = "";
     }
 
-    // read headers to extract status and content-type (simple parse of last status line)
-    res.status_code = 200; // default assumption if we got body
+    res.status_code = 200;
     res.content_type = "text/html";
     if (file::exists(tmpheaders)) {
-        String? hstr = (String)file::load_new(mem, tmpheaders);
-        if (try h = hstr) {
-            // naive parse: look for "HTTP/..." lines, take last
-            // split by lines
-            // very rough
-            res.status_code = parse_last_status(h);
-            res.content_type = parse_content_type(h);
+        if (try hdata = file::load(mem, tmpheaders)) {
+            String hstr = (String)hdata;
+            res.status_code = parse_last_status(hstr);
+            res.content_type = parse_content_type(hstr);
         }
     }
 
@@ -65,20 +55,15 @@ fn response::HttpResponse fetch_url(String url, int timeout_sec) {
 }
 
 fn int parse_last_status(String headers) {
-    // look for lines starting with HTTP/
     int last_code = 0;
     usz i = 0;
     while (i < headers.len) {
-        // find line start
         if (i + 5 <= headers.len) {
-            // check "HTTP/"
             if (headers[i] == 'H' && headers[i+1] == 'T' && headers[i+2] == 'T' && headers[i+3] == 'P' && headers[i+4] == '/') {
-                // find space, then code
                 usz j = i + 5;
                 while (j < headers.len && headers[j] != ' ') j++;
                 if (j < headers.len && headers[j] == ' ') {
                     j++;
-                    // parse 3 digits
                     int code = 0;
                     int digits = 0;
                     while (j < headers.len && headers[j] >= '0' && headers[j] <= '9' && digits < 3) {
@@ -89,7 +74,6 @@ fn int parse_last_status(String headers) {
                 }
             }
         }
-        // next line
         while (i < headers.len && headers[i] != '\n') i++;
         i++;
     }
@@ -98,11 +82,9 @@ fn int parse_last_status(String headers) {
 }
 
 fn String parse_content_type(String headers) {
-    // find "Content-Type:" (case-insensitive naive)
     String needle = "content-type:";
     usz i = 0;
     while (i + needle.len <= headers.len) {
-        // compare case-insensitively
         bool match = true;
         for (usz k = 0; k < needle.len; k++) {
             char c = headers[i+k];
@@ -110,9 +92,7 @@ fn String parse_content_type(String headers) {
             if (c != needle[k]) { match = false; break; }
         }
         if (match) {
-            // extract value until \r or \n
             usz vstart = i + needle.len;
-            // skip space
             while (vstart < headers.len && (headers[vstart] == ' ' || headers[vstart] == '\t')) vstart++;
             usz vend = vstart;
             while (vend < headers.len && headers[vend] != '\r' && headers[vend] != '\n') vend++;

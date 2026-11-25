@@ -21,8 +21,10 @@ fn bool is_http_or_https(String url) {
 }
 
 fn bool has_fragment(String url) {
-    // find # not in query? simple: last # 
-    for (isz i = (isz)url.len - 1; i >= 0; i--) {
+    if (url.len == 0) return false;
+    usz i = url.len;
+    while (i > 0) {
+        i--;
         if (url[i] == '#') return true;
         if (url[i] == '?') break;
     }
