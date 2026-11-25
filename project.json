@@ -4,13 +4,6 @@
   ],
   "build-dir": "build",
   "cpu": "generic",
-  "dependencies": [
-    "dessert",
-    "c3web"
-  ],
-  "dependency-search-paths": [
-    "lib"
-  ],
   "langrev": "1",
   "opt": "Oz",
   "output": "build",
