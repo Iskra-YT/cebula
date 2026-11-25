@@ -1,17 +1,29 @@
 {
-  "langrev": "1",
-  "warnings": [ "no-unused" ],
-  "dependencies": [ ],
-  "authors": [ "Szymon Izdebski" ],
-  "version": "0.1.0",
-  "sources": [ "src/**" ],
+  "authors": [
+    "Szymon Izdebski"
+  ],
   "build-dir": "build",
+  "cpu": "generic",
+  "dependencies": [
+    "dessert",
+    "c3web"
+  ],
+  "dependency-search-paths": [
+    "lib"
+  ],
+  "langrev": "1",
+  "opt": "Oz",
   "output": "build",
+  "sources": [
+    "src/**"
+  ],
   "targets": {
     "cebula": {
       "type": "executable"
     }
   },
-  "cpu": "generic",
-  "opt": "Oz"
+  "version": "0.1.0",
+  "warnings": [
+    "no-unused"
+  ]
 }
