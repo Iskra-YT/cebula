@@ -19,7 +19,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-mkdir -p "$SITE/docs" "$SITE/private"
+mkdir -p "$SITE/docs" "$SITE/private" "$SITE/bot-blocked"
 cat > "$SITE/index.html" <<'HTML'
 <!doctype html><html lang="en"><head><meta charset="utf-8">
 <title>Root &amp; Title</title>
@@ -29,6 +29,7 @@ cat > "$SITE/index.html" <<'HTML'
 <a href="page2.html">Page two</a>
 <a href="/docs/guide.pdf">Guide</a>
 <a href="/private/secret.html">Secret</a>
+<a href="/bot-blocked/page.html">Bot blocked</a>
 <a href="javascript:alert(1)">JS</a>
 <a href="#local">Fragment</a>
 <img src="/logo.png" alt="Logo"></body></html>
@@ -37,17 +38,47 @@ cat > "$SITE/page2.html" <<'HTML'
 <html><head><title>Second page</title></head><body><h1>Second</h1>
 <a href="/index.html">Back</a><a href="missing.html">Missing</a></body></html>
 HTML
-printf 'User-agent: *\nDisallow: /private/\nCrawl-delay: 0\n' > "$SITE/robots.txt"
+cat > "$SITE/robots.txt" <<'ROBOTS'
+User-agent: CebulaBot
+Disallow: /bot-blocked/
+
+User-agent: *
+Disallow: /private/
+Crawl-delay: 0
+ROBOTS
 printf 'secret' > "$SITE/private/secret.html"
+printf 'blocked' > "$SITE/bot-blocked/page.html"
 printf 'pdf' > "$SITE/docs/guide.pdf"
 
 cd "$ROOT"
 "$C3C" build >/dev/null
 
-python3 -m http.server "$PORT" --bind 127.0.0.1 --directory "$SITE" >"$TMP/server.log" 2>&1 &
+# A tiny server that records the User-Agent of every request, so the test can
+# verify the default header and a custom one end-to-end.
+cat > "$TMP/server.py" <<'PY'
+import functools, http.server, socketserver, sys
+
+port, directory, log_path = int(sys.argv[1]), sys.argv[2], sys.argv[3]
+
+class Handler(http.server.SimpleHTTPRequestHandler):
+    def do_GET(self):
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(self.path + "\t" + self.headers.get("User-Agent", "") + "\n")
+        return super().do_GET()
+
+    def log_message(self, *args):
+        pass
+
+socketserver.TCPServer.allow_reuse_address = True
+with socketserver.TCPServer(("127.0.0.1", port), functools.partial(Handler, directory=directory)) as server:
+    server.serve_forever()
+PY
+UA_LOG="$TMP/ua.log"
+: > "$UA_LOG"
+python3 "$TMP/server.py" "$PORT" "$SITE" "$UA_LOG" >"$TMP/server.log" 2>&1 &
 SERVER_PID=$!
 for _ in $(seq 1 50); do
-    if curl -fsS "http://127.0.0.1:$PORT/index.html" -o /dev/null 2>/dev/null; then break; fi
+    if curl -fsS -A 'CebulaBot/0.1' "http://127.0.0.1:$PORT/index.html" -o /dev/null 2>/dev/null; then break; fi
     sleep 0.1
 done
 
@@ -55,11 +86,15 @@ RESULT="$TMP/result.json"
 "$ROOT/build/cebula" crawl "http://127.0.0.1:$PORT/index.html" \
     --max-pages 10 --max-depth 2 --output "$RESULT" >/dev/null 2>"$TMP/crawl.err"
 
-python3 - "$RESULT" <<'PY'
+python3 - "$RESULT" "$UA_LOG" <<'PY'
 import json, sys
 
 with open(sys.argv[1], encoding="utf-8") as f:
     d = json.load(f)
+with open(sys.argv[2], encoding="utf-8") as f:
+    requests = [line.rstrip("\n").split("\t", 1) for line in f if line.strip()]
+assert requests and all(ua == "CebulaBot/0.1" for _, ua in requests), requests
+assert any(path == "/robots.txt" for path, _ in requests), requests
 
 assert d["crawler"]["name"] == "cebula", d["crawler"]
 assert d["task"]["status"] == "completed_with_errors", d["task"]
@@ -73,16 +108,34 @@ assert seed["title"] == "Root & Title", seed
 assert seed["description"] == "Root page description", seed
 assert seed["language"] == "en", seed
 assert [h["text"] for h in seed["headings"]] == ["Welcome", "Subtitle"], seed
-assert len(seed["links"]) == 3, seed["links"]
+assert len(seed["links"]) == 4, seed["links"]
 assert len(seed["images"]) == 1 and seed["images"][0]["alt"] == "Logo", seed
 assert any(p["url"].endswith("/page2.html") for p in d["pages"]), pages
 assert not any(p["url"].endswith(".pdf") for p in d["pages"]), "PDF was fetched as a page"
+assert not any(p["url"].endswith("/bot-blocked/page.html") for p in d["pages"]), "robots block was ignored"
 
 kinds = {e["kind"] for e in d["errors"]}
+assert any(e["kind"] == "robots" and e["url"].endswith("/bot-blocked/page.html") for e in d["errors"]), d["errors"]
 assert "robots" in kinds, d["errors"]
 assert "http_status" in kinds, d["errors"]
 assert d["resources"][0]["kind"] == "pdf", d["resources"]
 print("integration: OK")
+PY
+
+# A custom UA of exactly "CebulaBot" must also be sent and honoured by robots.txt.
+CUSTOM_RESULT="$TMP/custom.json"
+"$ROOT/build/cebula" crawl "http://127.0.0.1:$PORT/index.html" \
+    --user-agent 'CebulaBot' --max-pages 4 --max-depth 1 --output "$CUSTOM_RESULT" >/dev/null 2>"$TMP/custom.err"
+python3 - "$CUSTOM_RESULT" "$UA_LOG" <<'PY'
+import json, sys
+
+with open(sys.argv[1], encoding="utf-8") as f:
+    d = json.load(f)
+with open(sys.argv[2], encoding="utf-8") as f:
+    agents = [line.rstrip("\n").split("\t", 1)[1] for line in f if line.strip()]
+assert any(ua == "CebulaBot" for ua in agents), agents
+assert any(e["kind"] == "robots" and e["url"].endswith("/bot-blocked/page.html") for e in d["errors"]), d["errors"]
+print("user-agent: OK")
 PY
 
 # Negative cases: validation, no shell injection, no phantom output file.

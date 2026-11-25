@@ -102,15 +102,40 @@ fn void test_robots() @test
 {
     @pool()
     {
-        String content = "User-agent: *\nDisallow: /private/\nAllow: /private/public\n"
-                         "Crawl-delay: 2\nSitemap: https://example.com/sitemap.xml\n"
+        String content = "User-agent: CebulaBot\nDisallow: /bot-blocked/\n\n"
+                         "User-agent: *\nDisallow: /private/\nAllow: /private/public\n"
+                         "Crawl-delay: 2\nSitemap: https://example.com/sitemap.xml\n\n"
                          "User-agent: BadBot\nDisallow: /\n";
-        parser::RobotsRules rules = parser::parse_robots(content, "cebula");
+        parser::RobotsRules rules = parser::parse_robots(content, "CebulaBot/0.1");
         test::eq(2000, rules.crawl_delay_ms);
         test::eq(1, (int)rules.sitemaps.len);
+        test::eq(false, parser::is_allowed(&rules, "/bot-blocked/page"));
         test::eq(false, parser::is_allowed(&rules, "/private/secret"));
         test::eq(true, parser::is_allowed(&rules, "/private/public/page"));
         test::eq(true, parser::is_allowed(&rules, "/public"));
+
+        // "User-agent: CebulaBot" also matches a crawler identifying as CebulaBot.
+        parser::RobotsRules short_ua = parser::parse_robots(content, "CebulaBot");
+        test::eq(false, parser::is_allowed(&short_ua, "/bot-blocked/page"));
+
+        // Unrelated crawlers only see the wildcard group.
+        parser::RobotsRules other_ua = parser::parse_robots(content, "OtherBot/1.0");
+        test::eq(true, parser::is_allowed(&other_ua, "/bot-blocked/page"));
+        test::eq(false, parser::is_allowed(&other_ua, "/private/secret"));
+    };
+}
+
+fn void test_robots_version_rule() @test
+{
+    @pool()
+    {
+        String content = "User-agent: CebulaBot/0.1\nDisallow: /v1/\n";
+        parser::RobotsRules rules = parser::parse_robots(content, "CebulaBot");
+        test::eq(false, parser::is_allowed(&rules, "/v1/page"));
+        test::eq(true, parser::is_allowed(&rules, "/v2/page"));
+
+        parser::RobotsRules lower = parser::parse_robots(content, "cebulabot/0.1");
+        test::eq(false, parser::is_allowed(&lower, "/v1/page"));
     };
 }
 

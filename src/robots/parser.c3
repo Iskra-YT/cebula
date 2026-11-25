@@ -16,6 +16,38 @@ struct RobotsRules {
     int crawl_delay_ms; // -1 when not set
 }
 
+// Product name of a User-Agent, i.e. everything before the first '/'.
+fn String ua_product(String ua)
+{
+    String s = url_utils::trim(ua);
+    usz slash = url_utils::find_char(s, '/', 0);
+    return slash == NOT_FOUND ? s : url_utils::sub(s, 0, slash);
+}
+
+fn bool ua_boundary(char c)
+{
+    return c == '/' || c == ' ' || c == '(' || c == ';' || c == ',';
+}
+
+// A robots.txt "User-agent" token matches either the full User-Agent string
+// ("CebulaBot/0.1"), its product name ("CebulaBot"), or a version-specific
+// rule ("CebulaBot/0.1") when the crawler identifies as just "CebulaBot".
+fn bool ua_matches(String agent, String ua_name)
+{
+    String token = url_utils::trim(agent);
+    if (token.len == 0) return false;
+    if (token == "*") return true;
+
+    String ua = url_utils::trim(ua_name);
+    if (ua.len == 0) return false;
+    if (url_utils::eq_ignore_case(token, ua)) return true;
+    if (url_utils::eq_ignore_case(ua_product(token), ua_product(ua))) return true;
+
+    if (ua.len > token.len && url_utils::starts_with_ignore_case(ua, token) && ua_boundary(ua[token.len])) return true;
+    if (token.len > ua.len && url_utils::starts_with_ignore_case(token, ua) && ua_boundary(token[ua.len])) return true;
+    return false;
+}
+
 fn RobotsRules parse_robots(String content, String ua_name)
 {
     RobotsRules rr;
@@ -48,13 +80,13 @@ fn RobotsRules parse_robots(String content, String ua_name)
         {
             if (!group_has_agent || group_has_rule)
             {
-                group_matches = value == "*" || (ua_name.len > 0 && url_utils::contains_ignore_case(value, ua_name));
+                group_matches = value == "*" || (ua_name.len > 0 && ua_matches(value, ua_name));
                 group_has_agent = true;
                 group_has_rule = false;
             }
             else
             {
-                if (value == "*" || (ua_name.len > 0 && url_utils::contains_ignore_case(value, ua_name))) group_matches = true;
+                if (value == "*" || (ua_name.len > 0 && ua_matches(value, ua_name))) group_matches = true;
             }
             continue;
         }
