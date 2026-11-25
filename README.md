@@ -5,6 +5,7 @@
 ## Features
 
 - Breadth-first crawl with URL normalization, fragment stripping and duplicate detection.
+- Single-resource `fetch` command: one request, redirect handling, status and response headers, body to stdout or file.
 - Depth and page limits (`--max-depth`, `--max-pages`).
 - Same-site restriction by default (`--no-same-domain` to disable).
 - `robots.txt` support: `Allow`/`Disallow` (longest prefix wins), `Crawl-delay`, `Sitemap`.
@@ -36,6 +37,7 @@ cebula crawl https://example.com
 cebula crawl https://example.com --max-depth 2 --max-pages 50
 cebula crawl https://example.com --no-same-domain --delay-ms 500
 cebula crawl https://example.com --output result.json
+cebula fetch https://example.com/page.html --output page.html
 ```
 
 ### Options for `crawl`
@@ -49,9 +51,20 @@ cebula crawl https://example.com --output result.json
 | `--no-robots` | off | Ignore `robots.txt` (use responsibly). |
 | `--timeout <sec>` | `10` | Per-request timeout. |
 | `--delay-ms <n>` | `0` | Minimum delay between requests to the same host. |
-| `--user-agent <ua>` | `cebula/0.1 (+web crawler)` | User-Agent header. |
+| `--user-agent <ua>` | `CebulaBot/0.1` | User-Agent header. |
 | `--max-body-kb <n>` | `5120` | Maximum response body size. |
 | `--output <file>` | stdout | Where to write the JSON result. |
+
+### Options for `fetch`
+
+`cebula fetch <url>` performs one HTTP/HTTPS request (following redirects), reports the final status and all response headers on stderr, and writes only the response body to stdout or `--output`. It does not parse HTML, discover links or start a crawl.
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `--timeout <sec>` | `10` | Per-request timeout. |
+| `--user-agent <ua>` | `CebulaBot/0.1` | User-Agent header. |
+| `--max-body-kb <n>` | `5120` | Maximum response body size. |
+| `--output <file>` | stdout | Where to write the response body. |
 
 Invalid flags and non-integer values fail with exit code `2` and a message on stderr.
 

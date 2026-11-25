@@ -13,8 +13,10 @@ TMP="$(mktemp -d)"
 SITE="$TMP/site"
 PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')"
 SERVER_PID=""
+REDIRECT_PID=""
 cleanup() {
     if [[ -n "$SERVER_PID" ]]; then kill "$SERVER_PID" 2>/dev/null || true; fi
+    if [[ -n "$REDIRECT_PID" ]]; then kill "$REDIRECT_PID" 2>/dev/null || true; fi
     rm -rf "$TMP"
 }
 trap cleanup EXIT
@@ -122,6 +124,58 @@ assert d["resources"][0]["kind"] == "pdf", d["resources"]
 print("integration: OK")
 PY
 
+# fetch: one request only, headers/status on stderr, body on stdout or in a file.
+REDIRECT_PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')"
+python3 - "$REDIRECT_PORT" "$PORT" <<'PY' >"$TMP/redirect.log" 2>&1 &
+import http.server, sys
+
+redirect_port, target_port = int(sys.argv[1]), int(sys.argv[2])
+
+class Handler(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(302)
+        self.send_header("Location", f"http://127.0.0.1:{target_port}/page2.html")
+        self.end_headers()
+
+    def log_message(self, *args):
+        pass
+
+http.server.HTTPServer(("127.0.0.1", redirect_port), Handler).serve_forever()
+PY
+REDIRECT_PID=$!
+for _ in $(seq 1 50); do
+    if curl -s -o /dev/null "http://127.0.0.1:$REDIRECT_PORT/" 2>/dev/null; then break; fi
+    sleep 0.1
+done
+
+FETCH_BODY="$TMP/fetched.html"
+"$ROOT/build/cebula" fetch "http://127.0.0.1:$PORT/page2.html" \
+    --output "$FETCH_BODY" >"$TMP/fetch.out" 2>"$TMP/fetch.err"
+"$ROOT/build/cebula" fetch "http://127.0.0.1:$PORT/page2.html" \
+    >"$TMP/fetch-stdout.out" 2>"$TMP/fetch-stdout.err"
+"$ROOT/build/cebula" fetch "http://127.0.0.1:$REDIRECT_PORT/" \
+    >"$TMP/fetch-redirect.out" 2>"$TMP/fetch-redirect.err"
+
+python3 - "$FETCH_BODY" "$TMP/fetch.out" "$TMP/fetch.err" "$TMP/fetch-stdout.out" "$TMP/fetch-redirect.err" <<'PY'
+import pathlib, sys
+
+body_file, out_file, err_file, stdout_file, redirect_err = map(
+    lambda p: pathlib.Path(p).read_text(encoding="utf-8"), sys.argv[1:])
+assert "Second page" in body_file, body_file
+assert out_file == "", out_file
+assert "status 200" in err_file, err_file
+assert "header:" in err_file, err_file
+assert "content-type" in err_file.lower(), err_file
+assert "Second page" in stdout_file, stdout_file
+assert "302" in redirect_err, redirect_err
+assert "status 200" in redirect_err, redirect_err
+assert "Location:" in redirect_err, redirect_err
+print("integration fetch: OK")
+PY
+
+kill "$REDIRECT_PID" 2>/dev/null || true
+REDIRECT_PID=""
+
 # A custom UA of exactly "CebulaBot" must also be sent and honoured by robots.txt.
 CUSTOM_RESULT="$TMP/custom.json"
 "$ROOT/build/cebula" crawl "http://127.0.0.1:$PORT/index.html" \
@@ -144,6 +198,9 @@ if "$ROOT/build/cebula" crawl "not a url" >/dev/null 2>&1; then
 fi
 if "$ROOT/build/cebula" crawl "http://127.0.0.1:$PORT/index.html" --max-depth abc >/dev/null 2>&1; then
     echo "invalid --max-depth was accepted" >&2; exit 1
+fi
+if "$ROOT/build/cebula" fetch "not a url" >/dev/null 2>&1; then
+    echo "invalid fetch URL was accepted" >&2; exit 1
 fi
 MARKER="$TMP/pwned"
 "$ROOT/build/cebula" crawl "http://127.0.0.1:$PORT/index.html\"; touch $MARKER; echo \"" --max-pages 1 >/dev/null 2>&1 || true

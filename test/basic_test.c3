@@ -1,7 +1,9 @@
 module cebula::test;
 
 import std::core::test;
+import std::collections::list;
 import cebula::crawler::url_utils;
+import cebula::network::http;
 import cebula::parser::html;
 import cebula::robots::parser;
 import cebula::output::json_out;
@@ -136,6 +138,26 @@ fn void test_robots_version_rule() @test
 
         parser::RobotsRules lower = parser::parse_robots(content, "cebulabot/0.1");
         test::eq(false, parser::is_allowed(&lower, "/v1/page"));
+    };
+}
+
+fn void test_http_header_split() @test
+{
+    @pool()
+    {
+        List{String} headers;
+        headers.init(tmem);
+        String body;
+        String payload = "HTTP/1.1 301 Moved Permanently\r\nLocation: /final\r\n\r\n"
+                         "HTTP/1.1 200 OK\r\nContent-type: text/plain\r\n\r\n"
+                         "hello\r\nworld";
+        http::split_headers(payload, &headers, &body);
+        test::eq(4, (int)headers.len());
+        test::eq("HTTP/1.1 301 Moved Permanently", headers[0]);
+        test::eq("Location: /final", headers[1]);
+        test::eq("HTTP/1.1 200 OK", headers[2]);
+        test::eq("Content-type: text/plain", headers[3]);
+        test::eq("hello\r\nworld", body);
     };
 }
 

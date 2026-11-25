@@ -11,6 +11,7 @@ fn void print_help() {
     io::printn("");
     io::printn("Usage:");
     io::printn("  cebula crawl <url> [options]");
+    io::printn("  cebula fetch <url> [options]");
     io::printn("  cebula version");
     io::printn("  cebula help");
     io::printn("");
@@ -24,6 +25,13 @@ fn void print_help() {
     io::printn("  --user-agent <ua>   Custom User-Agent header");
     io::printn("  --max-body-kb <n>   Maximum response body size in KiB (default: 5120)");
     io::printn("  --output <file>     Write JSON output to file instead of stdout");
+    io::printn("");
+    io::printn("Options for fetch:");
+    io::printn("  Status and response headers go to stderr; the body goes to stdout or --output.");
+    io::printn("  --timeout <sec>     Request timeout in seconds (default: 10)");
+    io::printn("  --user-agent <ua>   Custom User-Agent header");
+    io::printn("  --max-body-kb <n>   Maximum response body size in KiB (default: 5120)");
+    io::printn("  --output <file>     Write the response body to file instead of stdout");
 }
 fn void print_version() {
     io::printfn("%s %s", NAME, VERSION);

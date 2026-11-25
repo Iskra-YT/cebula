@@ -4,6 +4,7 @@ import std::io;
 import cebula::cli::commands;
 import cebula::cli::arguments;
 import cebula::crawler::crawler;
+import cebula::fetch::fetch;
 
 fn bool parse_int(String s, int* out)
 {
@@ -35,6 +36,13 @@ fn int usage_error(String message)
     return 2;
 }
 
+fn int fetch_usage_error(String message)
+{
+    io::eprintfn("Error: %s", message);
+    io::eprintn("Usage: cebula fetch <url> [options]");
+    return 2;
+}
+
 fn int main(String[] args)
 {
     if (args.len < 2)
@@ -54,6 +62,49 @@ fn int main(String[] args)
         commands::print_version();
         return 0;
     }
+    if (cmd == "fetch")
+    {
+        if (args.len < 3) return fetch_usage_error("missing URL for fetch command");
+
+        arguments::FetchOptions opts = arguments::default_fetch_options(args[2]);
+        usz i = 3;
+        while (i < args.len)
+        {
+            String a = args[i];
+            if (i + 1 >= args.len) return fetch_usage_error("missing value for option");
+
+            String value = args[i + 1];
+            int parsed = 0;
+            if (a == "--timeout")
+            {
+                if (!parse_int(value, &parsed)) return fetch_usage_error("--timeout requires an integer");
+                opts.timeout_sec = parsed;
+            }
+            else if (a == "--max-body-kb")
+            {
+                if (!parse_int(value, &parsed) || parsed < 1 || parsed > 1_000_000) return fetch_usage_error("--max-body-kb requires a value in KiB");
+                opts.max_body_bytes = (usz)parsed * 1024;
+            }
+            else if (a == "--user-agent")
+            {
+                opts.user_agent = value;
+            }
+            else if (a == "--output")
+            {
+                if (value.len == 0) return fetch_usage_error("--output requires a file path");
+                opts.output_path = value;
+                opts.has_output_path = true;
+            }
+            else
+            {
+                io::eprintfn("Error: unknown option: %s", a);
+                return 2;
+            }
+            i += 2;
+        }
+        return fetch::run_fetch(opts);
+    }
+
     if (cmd != "crawl")
     {
         io::eprintfn("Unknown command: %s", cmd);

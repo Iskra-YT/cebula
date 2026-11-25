@@ -24,7 +24,28 @@ fn CrawlOptions default_crawl_options(String url)
     opt.follow_robots = true;
     opt.timeout_sec = 10;
     opt.delay_ms = 0;
-    opt.user_agent = "cebula";
+    opt.user_agent = "CebulaBot/0.1";
+    opt.max_body_bytes = 5 * 1024 * 1024;
+    opt.output_path = "";
+    opt.has_output_path = false;
+    return opt;
+}
+
+struct FetchOptions {
+    String url;
+    int timeout_sec;
+    String user_agent;
+    usz max_body_bytes;
+    String output_path; // empty means stdout
+    bool has_output_path;
+}
+
+fn FetchOptions default_fetch_options(String url)
+{
+    FetchOptions opt;
+    opt.url = url;
+    opt.timeout_sec = 10;
+    opt.user_agent = "CebulaBot/0.1";
     opt.max_body_bytes = 5 * 1024 * 1024;
     opt.output_path = "";
     opt.has_output_path = false;
