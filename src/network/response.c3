@@ -9,4 +9,5 @@ struct HttpResponse {
     String error_kind;
     String error_message;
     usz bytes_downloaded;
+    String[] headers; // raw header lines from every response, including redirects
 }

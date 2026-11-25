@@ -1,6 +1,7 @@
 module cebula::network::http;
 
 import std::io;
+import std::collections::list;
 import std::os::process;
 import cebula::network::response;
 import cebula::crawler::url_utils;
@@ -33,6 +34,53 @@ fn String next_line(String s, usz* pos)
     if (*pos < s.len && s[*pos] == '\r') (*pos)++;
     if (*pos < s.len && s[*pos] == '\n') (*pos)++;
     return url_utils::trim(line);
+}
+
+fn String raw_line(String s, usz* pos)
+{
+    usz start = *pos;
+    usz end = start;
+    while (end < s.len && s[end] != '\n' && s[end] != '\r') end++;
+    String line = url_utils::sub(s, start, end);
+    *pos = end;
+    if (*pos < s.len && s[*pos] == '\r') (*pos)++;
+    if (*pos < s.len && s[*pos] == '\n') (*pos)++;
+    return line;
+}
+
+// curl --dump-header - writes every response's headers before the body.
+// Split those blocks off so callers see headers without them polluting body.
+fn void split_headers(String payload, List{String}* headers, String* body)
+{
+    usz pos = 0;
+    bool in_headers = false;
+    while (pos < payload.len)
+    {
+        usz body_start = pos;
+        String line = url_utils::trim(raw_line(payload, &pos));
+        if (url_utils::starts_with_ignore_case(line, "HTTP/"))
+        {
+            in_headers = true;
+            headers.push(line);
+            continue;
+        }
+        if (!in_headers)
+        {
+            *body = url_utils::sub(payload, body_start, payload.len);
+            return;
+        }
+        if (line.len == 0)
+        {
+            in_headers = false;
+            usz peek = pos;
+            String next = url_utils::trim(raw_line(payload, &peek));
+            if (url_utils::starts_with_ignore_case(next, "HTTP/")) continue;
+            *body = url_utils::sub(payload, pos, payload.len);
+            return;
+        }
+        headers.push(line);
+    }
+    *body = "";
 }
 
 fn int parse_status(String line)
@@ -104,6 +152,7 @@ fn response::HttpResponse fetch_url(String url, int timeout_sec, String user_age
     res.error_kind = "";
     res.error_message = "";
     res.bytes_downloaded = 0;
+    res.headers = {};
 
     String normalized = url_utils::normalize_url(url);
     if (normalized.len == 0)
@@ -120,15 +169,16 @@ fn response::HttpResponse fetch_url(String url, int timeout_sec, String user_age
     limit_str.init(tmem);
     limit_str.appendf("%d", (int)max_body_bytes);
 
-    String ua = user_agent.len > 0 ? user_agent : "cebula/0.1 (+web crawler)";
-    String[18] cmd = {
+    String ua = user_agent.len > 0 ? user_agent : "CebulaBot/0.1";
+    String[20] cmd = {
         "curl", "--silent", "--show-error", "--location", "--max-redirs", "5",
         "--max-time", timeout_str.str_view(), "--connect-timeout", "5", "--compressed",
         "--max-filesize", limit_str.str_view(), "--user-agent", ua,
+        "--dump-header", "-",
         "--write-out", "\n__cebula_META_BEGIN__\n%{http_code}\n%{url_effective}\n%{content_type}\n%{size_download}\n__cebula_META_END__\n",
         ""
     };
-    usz count = 18;
+    usz count = 20;
     cmd[count - 1] = normalized;
 
     Process? spawned = process::spawn(cmd[0..count - 1], SpawnOptions.INHERIT_ENV, {},
@@ -185,11 +235,17 @@ fn response::HttpResponse fetch_url(String url, int timeout_sec, String user_age
             return res;
         }
 
-        String body = url_utils::sub(output, 0, marker);
-        while (body.len > 0 && (body[body.len - 1] == '\n' || body[body.len - 1] == '\r'))
+        String payload = url_utils::sub(output, 0, marker);
+        while (payload.len > 0 && (payload[payload.len - 1] == '\n' || payload[payload.len - 1] == '\r'))
         {
-            body = url_utils::sub(body, 0, body.len - 1);
+            payload = url_utils::sub(payload, 0, payload.len - 1);
         }
+
+        List{String} headers;
+        headers.init(tmem);
+        String body;
+        split_headers(payload, &headers, &body);
+        res.headers = headers.array_view();
 
         usz pos = marker + META_BEGIN.len;
         while (pos < output.len && (output[pos] == '\n' || output[pos] == '\r')) pos++;
